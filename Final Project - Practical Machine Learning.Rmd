@@ -1,0 +1,166 @@
+---
+title: "Pratical Machine Learning - Final Project"
+author: "Steven Zylinski"
+date: "Created: 2019-03-12; Last updated:`r Sys.Date()`"
+output:
+  html_document:
+    number_sections: false
+    toc: true
+    fig_width: 8
+    fig_height: 6
+    theme: cosmo
+    highlight: tango
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(gbm)
+library(ggfortify)
+library(GGally)
+library(rpart)
+library(rpart.plot)
+library(corrplot)
+library(RColorBrewer)
+library(randomForest)
+library(rattle)
+```
+
+# Project Purpose
+
+The goal of the project is to predict how well they did the exercice (classe variable).
+In this report, I am told to :
+
+- Describe how I build the model
+- How I use cross validation
+- What I think the expected out of sample error is
+- Why I made the choice I did
+
+Then I should use my model to predict 20 different test cases
+
+# Pre-Processing
+
+## Loading the data and creating a validation data set
+
+We create a dataset of validation based on the training dataset in order to calibrate our model
+```{r}
+set.seed(2806)
+ train <- read.csv("~/Desktop/pml-training.csv",na.strings=c("#DIV/0!","NA",""))
+ test <- read.csv("~/Desktop/pml-testing.csv",na.strings=c("#DIV/0!","NA",""))
+```
+
+## Cleaning features
+
+First we start by removing *id type features* :
+
+```{r}
+train <- train[,-c(1:5)]
+test <- test[,-c(1:5)]
+```
+
+
+Then we remove features that have *Near Zero Variance* :
+
+```{r}
+
+NZV <- nearZeroVar(train)
+train <- train[,-NZV]
+test <- test[,-NZV]
+
+```
+
+Finally we remove features that are almost always *NA* :
+
+```{r}
+
+# We take all feature that have an average of NA greater than 90 %
+
+FullNA <- sapply(train,function(x) mean(is.na(x))) > .90
+train <- train[,FullNA==FALSE]
+test <- test[,FullNA==FALSE]
+
+```
+
+
+## Partitionning Data
+
+In order to evaluate my out of sample error, I am going to split my train data between a train dataset and a validation dataset :
+
+```{r}
+ inTrain <- createDataPartition(train$classe,p = 3/4)[[1]]
+ validation <- train[-inTrain,]
+ train <- train[inTrain,]
+```
+
+## Model
+
+### Decision Tree
+
+Let's start with a simple decision tree :
+
+```{r}
+fitDT <- train(classe~., data = train, method = "rpart")
+fancyRpartPlot(fitDT$finalModel)
+```
+
+Let's evaluate this model on our validation dataset :
+
+```{r}
+predictDT <- predict(fitDT,validation)
+confusionMatrix(predictDT,validation$classe)
+```
+
+A single decision tree doesn't seems enough to predict correctly classes. Let's use multiple trees !
+
+### RandomForest
+
+First let's train our Random Forest on our train dataset. In order to select optimal tuning parameter, we use a cross-validation method :
+
+```{r}
+myControl <- trainControl(method = "cv",number = 4,verboseIter = FALSE)
+fitRF <- train(classe ~., data = train,method = "rf", trControl = myControl)
+```
+
+Let's have a quick look at our model :
+
+```{r}
+fitRF$finalModel
+```
+
+And then evaluate the model on our validation dataset :
+
+```{r}
+predictRF <- predict(fitRF,validation)
+confusionMatrix(predictRF,validation$classe)
+```
+
+Much much better ! But such a high accuracy could be meaning that we are overfitting data. Let's try a GBM model in order to comparer performance.
+
+### GBM
+
+Let's train our model using again a cross validation method to tune our hyper parameters :
+
+```{r}
+myControlGB <- trainControl(method = "cv", number = 4, verboseIter = FALSE)
+fitGBM <- train(classe~., data = train , method = "gbm", trControl = myControlGB, verbose = FALSE)
+```
+
+Finally let's see how well it performed :
+
+```{r}
+predictGBM <- predict(fitGBM,validation)
+confusionMatrix(predictGBM,validation$classe)
+```
+
+# Conclusion
+
+Even if RandomForest has the highest accuracy rate (and therefor supposely the lowest out of sample error), I decided to use the GBM model to predict classes for the test dataset in order to avoid the overfitting.
+
+```{r}
+final <- predict(fitGBM,test)
+final
+```
+
